@@ -12,6 +12,46 @@ from loguru import logger
 from sapien.asset import create_dome_envmap
 from sapien.utils import Viewer
 
+try:
+    import pyrealsense2 as rs
+    HAS_REALSENSE = True
+except ImportError:
+    HAS_REALSENSE = False
+
+
+def _select_realsense_serial(prefer_model: str = "D435") -> Optional[str]:
+    """Select a RealSense camera serial number, preferring the specified model."""
+    if not HAS_REALSENSE:
+        return None
+    try:
+        ctx = rs.context()
+        devices = ctx.query_devices()
+    except Exception:
+        return None
+
+    if len(devices) == 0:
+        return None
+
+    prefer_model = (prefer_model or "").lower()
+    for dev in devices:
+        try:
+            name = dev.get_info(rs.camera_info.name).lower()
+            if prefer_model and prefer_model in name:
+                serial = dev.get_info(rs.camera_info.serial_number)
+                logger.info(f"Selected RealSense: {name} (serial: {serial})")
+                return serial
+        except Exception:
+            continue
+
+    # Fallback to first device
+    try:
+        serial = devices[0].get_info(rs.camera_info.serial_number)
+        name = devices[0].get_info(rs.camera_info.name)
+        logger.info(f"Fallback to first RealSense: {name} (serial: {serial})")
+        return serial
+    except Exception:
+        return None
+
 from dex_retargeting.constants import (
     RobotName,
     RetargetingType,
@@ -152,7 +192,39 @@ def start_retargeting(queue: multiprocessing.Queue, robot_dir: str, config_path:
             viewer.render()
 
 
-def produce_frame(queue: multiprocessing.Queue, camera_path: Optional[str] = None):
+def produce_frame_realsense(queue: multiprocessing.Queue, rs_model: str = "D435"):
+    """Produce frames from Intel RealSense camera using pyrealsense2."""
+    pipeline = rs.pipeline()
+    config = rs.config()
+
+    # Select specific camera by model
+    serial = _select_realsense_serial(rs_model)
+    if serial:
+        config.enable_device(serial)
+
+    config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
+    pipeline.start(config)
+
+    try:
+        while True:
+            frames = pipeline.wait_for_frames()
+            color_frame = frames.get_color_frame()
+            if not color_frame:
+                continue
+            image = np.asanyarray(color_frame.get_data())
+            queue.put(image)
+            time.sleep(1 / 30.0)
+    finally:
+        pipeline.stop()
+
+
+def produce_frame(queue: multiprocessing.Queue, camera_path: Optional[str] = None, use_realsense: bool = False, rs_model: str = "D435"):
+    if use_realsense:
+        if not HAS_REALSENSE:
+            raise RuntimeError("pyrealsense2 is not installed. Install it with: pip install pyrealsense2")
+        produce_frame_realsense(queue, rs_model)
+        return
+
     if camera_path is None:
         cap = cv2.VideoCapture(0)
     else:
@@ -171,6 +243,8 @@ def main(
     retargeting_type: RetargetingType,
     hand_type: HandType,
     camera_path: Optional[str] = None,
+    use_realsense: bool = False,
+    rs_model: str = "D435",
 ):
     """
     Detects the human hand pose from a video and translates the human pose trajectory into a robot pose trajectory.
@@ -182,6 +256,8 @@ def main(
             Please note that retargeting is specific to the same type of hand: a left robot hand can only be retargeted
             to another left robot hand, and the same applies for the right hand.
         camera_path: the device path to feed to opencv to open the web camera. It will use 0 by default.
+        use_realsense: Use Intel RealSense camera via pyrealsense2 instead of OpenCV.
+        rs_model: RealSense camera model to use (e.g., D435, D415). Only used when use_realsense is True.
     """
     config_path = get_default_config_path(robot_name, retargeting_type, hand_type)
     robot_dir = (
@@ -190,7 +266,7 @@ def main(
 
     queue = multiprocessing.Queue(maxsize=1000)
     producer_process = multiprocessing.Process(
-        target=produce_frame, args=(queue, camera_path)
+        target=produce_frame, args=(queue, camera_path, use_realsense, rs_model)
     )
     consumer_process = multiprocessing.Process(
         target=start_retargeting, args=(queue, str(robot_dir), str(config_path))

@@ -1,10 +1,10 @@
 import mediapipe as mp
-import mediapipe.framework as framework
 import numpy as np
-from mediapipe.framework.formats import landmark_pb2
-from mediapipe.python.solutions import hands_connections
-from mediapipe.python.solutions.drawing_utils import DrawingSpec
-from mediapipe.python.solutions.hands import HandLandmark
+
+# Access mediapipe solutions through mp.solutions
+DrawingSpec = mp.solutions.drawing_utils.DrawingSpec
+HandLandmark = mp.solutions.hands.HandLandmark
+hands_connections = mp.solutions.hands_connections
 
 OPERATOR2MANO_RIGHT = np.array(
     [
@@ -45,9 +45,7 @@ class SingleHandDetector:
         self.detected_hand_type = hand_type if selfie else inverse_hand_dict[hand_type]
 
     @staticmethod
-    def draw_skeleton_on_image(
-        image, keypoint_2d: landmark_pb2.NormalizedLandmarkList, style="white"
-    ):
+    def draw_skeleton_on_image(image, keypoint_2d, style="white"):
         if style == "default":
             mp.solutions.drawing_utils.draw_landmarks(
                 image,
@@ -105,9 +103,7 @@ class SingleHandDetector:
         return num_box, joint_pos, keypoint_2d, mediapipe_wrist_rot
 
     @staticmethod
-    def parse_keypoint_3d(
-        keypoint_3d: framework.formats.landmark_pb2.LandmarkList,
-    ) -> np.ndarray:
+    def parse_keypoint_3d(keypoint_3d) -> np.ndarray:
         keypoint = np.empty([21, 3])
         for i in range(21):
             keypoint[i][0] = keypoint_3d.landmark[i].x
@@ -116,9 +112,7 @@ class SingleHandDetector:
         return keypoint
 
     @staticmethod
-    def parse_keypoint_2d(
-        keypoint_2d: landmark_pb2.NormalizedLandmarkList, img_size
-    ) -> np.ndarray:
+    def parse_keypoint_2d(keypoint_2d, img_size) -> np.ndarray:
         keypoint = np.empty([21, 2])
         for i in range(21):
             keypoint[i][0] = keypoint_2d.landmark[i].x

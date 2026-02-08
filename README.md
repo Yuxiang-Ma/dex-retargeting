@@ -48,6 +48,10 @@ cd dex-retargeting
 pip install -e ".[example]"
 ```
 
+```
+python show_franka_retargeting.py --force-scale 1.0 --rs-model D435 --scale 1.0 --use-realsense --show --track-rotation --rot-scale 0.5
+```
+
 ## Changelog
 
 ### v0.5.0
